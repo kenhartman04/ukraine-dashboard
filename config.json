@@ -1,0 +1,7 @@
+{
+  "project_id": "gdelt-reader-492021",
+  "countryCode": "UP",
+  "country_code": "UP",
+  "days_back": 7,
+  "output_file": "ukraine_combined.json"
+}
