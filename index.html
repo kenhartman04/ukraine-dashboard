@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ukraine Conflict Intelligence — GDELT + Telegram OSINT</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700;900&family=Barlow:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #080c10;
+    --surface:   #0d1117;
+    --surface2:  #131920;
+    --border:    #1e2d3d;
+    --border2:   #243447;
+    --accent:    #00d4ff;
+    --accent2:   #0099bb;
+    --warn:      #ff6b35;
+    --danger:    #ff2d55;
+    --safe:      #00e676;
+    --tg:        #29b6f6;
+    --text:      #e8f4f8;
+    --text2:     #7a9bb5;
+    --text3:     #4a6a80;
+    --mono:      'Share Tech Mono', monospace;
+    --sans:      'Barlow', sans-serif;
+    --cond:      'Barlow Condensed', sans-serif;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:var(--sans); min-height:100vh; overflow-x:hidden; }
+  body::before {
+    content:''; position:fixed; inset:0;
+    background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,212,255,0.015) 2px,rgba(0,212,255,0.015) 4px);
+    pointer-events:none; z-index:9999;
+  }
+
+  /* Header */
+  header {
+    background:var(--surface); border-bottom:1px solid var(--border);
+    padding:0 2rem; display:flex; align-items:center; justify-content:space-between;
+    height:64px; position:sticky; top:0; z-index:1000;
+  }
+  .header-left { display:flex; align-items:center; gap:1.5rem; }
+  .logo-mark {
+    width:36px; height:36px; border:2px solid var(--accent);
+    display:flex; align-items:center; justify-content:center;
+    position:relative; animation:pulse-border 3s infinite;
+  }
+  .logo-mark::before { content:''; position:absolute; inset:4px; background:var(--accent); opacity:0.15; }
+  .logo-mark svg { width:18px; height:18px; fill:var(--accent); position:relative; z-index:1; }
+  @keyframes pulse-border { 0%,100%{box-shadow:0 0 0 0 rgba(0,212,255,0.4);}50%{box-shadow:0 0 0 6px rgba(0,212,255,0);} }
+  .header-title h1 { font-family:var(--cond); font-weight:700; font-size:1.1rem; letter-spacing:0.15em; text-transform:uppercase; }
+  .header-title p { font-family:var(--mono); font-size:0.65rem; color:var(--text3); letter-spacing:0.05em; margin-top:1px; }
+  .header-right { display:flex; align-items:center; gap:2rem; }
+  .live-badge { display:flex; align-items:center; gap:0.5rem; font-family:var(--mono); font-size:0.7rem; color:var(--safe); letter-spacing:0.1em; }
+  .live-dot { width:7px; height:7px; background:var(--safe); border-radius:50%; animation:blink 1.5s infinite; }
+  @keyframes blink { 0%,100%{opacity:1;}50%{opacity:0.2;} }
+  .timestamp { font-family:var(--mono); font-size:0.7rem; color:var(--text3); }
+
+  /* KPI Strip */
+  .kpi-strip { display:grid; grid-template-columns:repeat(6,1fr); border-bottom:1px solid var(--border); }
+  .kpi { padding:1rem 1.25rem; border-right:1px solid var(--border); position:relative; overflow:hidden; transition:background 0.2s; }
+  .kpi:last-child { border-right:none; }
+  .kpi::after { content:''; position:absolute; bottom:0; left:0; right:0; height:2px; background:var(--accent); transform:scaleX(0); transform-origin:left; transition:transform 0.4s ease; }
+  .kpi:hover { background:var(--surface); }
+  .kpi:hover::after { transform:scaleX(1); }
+  .kpi-label { font-family:var(--mono); font-size:0.6rem; color:var(--text3); text-transform:uppercase; letter-spacing:0.12em; margin-bottom:0.4rem; }
+  .kpi-value { font-family:var(--cond); font-size:1.9rem; font-weight:900; line-height:1; }
+  .kpi-sub { font-family:var(--mono); font-size:0.6rem; color:var(--text3); margin-top:0.25rem; }
+  .kpi-value.danger { color:var(--danger); }
+  .kpi-value.warn   { color:var(--warn); }
+  .kpi-value.accent { color:var(--accent); }
+  .kpi-value.tg     { color:var(--tg); }
+  .kpi-value.safe   { color:var(--safe); }
+
+  /* Layer toggles */
+  .layer-bar {
+    background:var(--surface2); border-bottom:1px solid var(--border);
+    padding:0.6rem 1.5rem; display:flex; align-items:center; gap:1rem;
+  }
+  .layer-label { font-family:var(--mono); font-size:0.65rem; color:var(--text3); text-transform:uppercase; letter-spacing:0.1em; }
+  .layer-btn {
+    font-family:var(--mono); font-size:0.65rem; padding:4px 12px;
+    border-radius:2px; cursor:pointer; transition:all 0.15s;
+    letter-spacing:0.08em; text-transform:uppercase; border:1px solid;
+  }
+  .layer-btn.gdelt-btn { border-color:var(--danger); color:var(--danger); background:rgba(255,45,85,0.08); }
+  .layer-btn.gdelt-btn.off { border-color:var(--border2); color:var(--text3); background:transparent; }
+  .layer-btn.tg-btn { border-color:var(--tg); color:var(--tg); background:rgba(41,182,246,0.08); }
+  .layer-btn.tg-btn.off { border-color:var(--border2); color:var(--text3); background:transparent; }
+  .layer-divider { width:1px; height:20px; background:var(--border); margin:0 0.5rem; }
+
+  /* Main layout */
+  .main { display:grid; grid-template-columns:1fr 360px; height:calc(100vh - 64px - 72px - 44px); min-height:450px; }
+  #map { height:100%; background:#060a0e; border-right:1px solid var(--border); }
+
+  /* Sidebar */
+  .sidebar { background:var(--surface); display:flex; flex-direction:column; overflow:hidden; }
+  .sidebar-header { padding:1rem 1.25rem; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+  .sidebar-header h2 { font-family:var(--cond); font-size:0.8rem; font-weight:700; letter-spacing:0.2em; text-transform:uppercase; color:var(--text2); }
+  .event-count { font-family:var(--mono); font-size:0.65rem; color:var(--accent); background:rgba(0,212,255,0.08); border:1px solid rgba(0,212,255,0.2); padding:2px 8px; border-radius:2px; }
+
+  /* Source filter */
+  .filters { padding:0.75rem 1.25rem; border-bottom:1px solid var(--border); display:flex; gap:0.5rem; flex-wrap:wrap; }
+  .filter-btn { font-family:var(--mono); font-size:0.62rem; letter-spacing:0.08em; padding:4px 10px; border:1px solid var(--border2); background:transparent; color:var(--text2); cursor:pointer; text-transform:uppercase; transition:all 0.15s; border-radius:2px; }
+  .filter-btn:hover,.filter-btn.active { background:rgba(0,212,255,0.1); border-color:var(--accent); color:var(--accent); }
+  .filter-btn.active-tg { background:rgba(41,182,246,0.1); border-color:var(--tg); color:var(--tg); }
+  .filter-btn.active-danger { background:rgba(255,45,85,0.1); border-color:var(--danger); color:var(--danger); }
+
+  /* Event feed */
+  .event-feed { overflow-y:auto; flex:1; }
+  .event-feed::-webkit-scrollbar { width:4px; }
+  .event-feed::-webkit-scrollbar-track { background:var(--surface); }
+  .event-feed::-webkit-scrollbar-thumb { background:var(--border2); border-radius:2px; }
+
+  .event-card { padding:0.9rem 1.25rem; border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.15s; position:relative; animation:fadeIn 0.3s ease both; }
+  .event-card::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; opacity:0; transition:opacity 0.15s; }
+  .event-card.gdelt-card::before { background:var(--danger); }
+  .event-card.tg-card::before { background:var(--tg); }
+  .event-card:hover { background:var(--surface2); }
+  .event-card:hover::before { opacity:1; }
+  .event-card.highlighted { background:var(--surface2); }
+  .event-card.highlighted::before { opacity:1; }
+
+  @keyframes fadeIn { from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);} }
+
+  .event-card-header { display:flex; align-items:flex-start; justify-content:space-between; gap:0.5rem; margin-bottom:0.4rem; }
+  .event-location { font-family:var(--cond); font-size:0.85rem; font-weight:600; color:var(--text); line-height:1.2; flex:1; }
+  .event-badge { font-family:var(--mono); font-size:0.56rem; padding:2px 6px; border-radius:2px; text-transform:uppercase; letter-spacing:0.05em; white-space:nowrap; }
+  .badge-gdelt { background:rgba(255,45,85,0.15); color:var(--danger); border:1px solid rgba(255,45,85,0.3); }
+  .badge-tg { background:rgba(41,182,246,0.15); color:var(--tg); border:1px solid rgba(41,182,246,0.3); }
+  .event-sub { font-family:var(--mono); font-size:0.62rem; color:var(--text3); margin-bottom:0.4rem; }
+  .event-text { font-size:0.72rem; color:var(--text2); line-height:1.4; margin-bottom:0.4rem; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .event-meta { display:flex; gap:1rem; align-items:center; }
+  .meta-item { display:flex; align-items:center; gap:0.3rem; font-family:var(--mono); font-size:0.6rem; color:var(--text3); }
+  .goldstein-bar { flex:1; height:3px; background:var(--border); border-radius:2px; overflow:hidden; margin:0 0.25rem; }
+  .goldstein-fill { height:100%; border-radius:2px; background:var(--danger); }
+  .source-link { font-family:var(--mono); font-size:0.58rem; color:var(--accent2); text-decoration:none; opacity:0.7; transition:opacity 0.15s; display:inline-block; margin-top:0.35rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+  .source-link:hover { opacity:1; }
+
+  /* Bottom bar */
+  .bottom-bar { background:var(--surface); border-top:1px solid var(--border); padding:0.5rem 1.5rem; display:flex; align-items:center; justify-content:space-between; }
+  .bottom-stats { display:flex; gap:2rem; }
+  .bottom-stat { display:flex; align-items:center; gap:0.5rem; font-family:var(--mono); font-size:0.62rem; color:var(--text3); }
+  .bottom-stat strong { color:var(--text2); font-weight:400; }
+  .data-source { font-family:var(--mono); font-size:0.58rem; color:var(--text3); }
+  .data-source span { color:var(--accent); }
+  .data-source span.tg { color:var(--tg); }
+
+  /* Map popups */
+  .leaflet-popup-content-wrapper { background:var(--surface)!important; border:1px solid var(--border2)!important; border-radius:4px!important; box-shadow:0 8px 32px rgba(0,0,0,0.6)!important; color:var(--text)!important; }
+  .leaflet-popup-tip { background:var(--surface)!important; }
+  .popup-inner { font-family:var(--sans); min-width:220px; max-width:280px; }
+  .popup-location { font-family:var(--cond); font-size:1rem; font-weight:700; color:var(--text); margin-bottom:0.5rem; border-bottom:1px solid var(--border); padding-bottom:0.5rem; }
+  .popup-source { font-family:var(--mono); font-size:0.6rem; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:0.5rem; }
+  .popup-source.gdelt { color:var(--danger); }
+  .popup-source.tg { color:var(--tg); }
+  .popup-row { display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:0.25rem; color:var(--text2); }
+  .popup-row .label { font-family:var(--mono); font-size:0.6rem; color:var(--text3); text-transform:uppercase; letter-spacing:0.08em; }
+  .popup-text { font-size:0.68rem; color:var(--text2); line-height:1.4; margin:0.5rem 0; padding:0.4rem; background:rgba(255,255,255,0.03); border-radius:2px; border-left:2px solid var(--tg); }
+  .popup-link { display:block; margin-top:0.6rem; font-family:var(--mono); font-size:0.6rem; color:var(--accent); text-decoration:none; border:1px solid rgba(0,212,255,0.2); padding:4px 8px; text-align:center; transition:background 0.15s; }
+  .popup-link:hover { background:rgba(0,212,255,0.1); }
+
+  /* Legend */
+  .map-legend { background:var(--surface)!important; border:1px solid var(--border)!important; border-radius:4px; padding:10px 14px!important; }
+  .legend-title { font-family:var(--mono); font-size:0.6rem; text-transform:uppercase; letter-spacing:0.12em; color:var(--text3); margin-bottom:8px; }
+  .legend-item { display:flex; align-items:center; gap:8px; margin-bottom:5px; font-family:var(--mono); font-size:0.63rem; color:var(--text2); }
+  .legend-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+  .legend-sq { width:10px; height:10px; border-radius:2px; flex-shrink:0; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <div class="logo-mark">
+      <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+    </div>
+    <div class="header-title">
+      <h1>Ukraine Conflict Intelligence Monitor</h1>
+      <p>GDELT Event Database + Telegram OSINT — Hartman Analytics LLC</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="live-badge"><div class="live-dot"></div>LIVE FEED</div>
+    <div class="timestamp" id="clock"></div>
+  </div>
+</header>
+
+<div class="kpi-strip">
+  <div class="kpi">
+    <div class="kpi-label">GDELT Events</div>
+    <div class="kpi-value danger" id="kpi-gdelt">—</div>
+    <div class="kpi-sub">conflict incidents</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Telegram Locations</div>
+    <div class="kpi-value tg" id="kpi-tg">—</div>
+    <div class="kpi-sub">geolocated mentions</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Channels Monitored</div>
+    <div class="kpi-value accent" id="kpi-channels">—</div>
+    <div class="kpi-sub">official military sources</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Avg Goldstein</div>
+    <div class="kpi-value danger" id="kpi-goldstein">—</div>
+    <div class="kpi-sub">stability index</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Total Mentions</div>
+    <div class="kpi-value accent" id="kpi-mentions">—</div>
+    <div class="kpi-sub">media volume</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Total Signals</div>
+    <div class="kpi-value safe" id="kpi-total">—</div>
+    <div class="kpi-sub">combined OSINT</div>
+  </div>
+</div>
+
+<div class="layer-bar">
+  <span class="layer-label">Layers:</span>
+  <button class="layer-btn gdelt-btn" id="gdelt-toggle" onclick="toggleLayer('gdelt')">● GDELT Events</button>
+  <button class="layer-btn tg-btn" id="tg-toggle" onclick="toggleLayer('tg')">● Telegram OSINT</button>
+  <div class="layer-divider"></div>
+  <span class="layer-label">Filter:</span>
+  <button class="filter-btn active" onclick="filterFeed('all',this)">All</button>
+  <button class="filter-btn" onclick="filterFeed('gdelt',this)">GDELT Only</button>
+  <button class="filter-btn" onclick="filterFeed('tg',this)">Telegram Only</button>
+</div>
+
+<div class="main">
+  <div id="map"></div>
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h2>Intelligence Feed</h2>
+      <span class="event-count" id="feed-count">0 signals</span>
+    </div>
+    <div class="event-feed" id="event-feed"></div>
+  </div>
+</div>
+
+<div class="bottom-bar">
+  <div class="bottom-stats">
+    <div class="bottom-stat"><span>Date</span><strong id="stat-date">2026-04-02</strong></div>
+    <div class="bottom-stat"><span>Avg Tone</span><strong id="stat-tone">—</strong></div>
+    <div class="bottom-stat"><span>Geoparser</span><strong style="color:var(--tg)">mordecai3 v3.4</strong></div>
+    <div class="bottom-stat"><span>NLP Model</span><strong style="color:var(--tg)">en_core_web_trf</strong></div>
+  </div>
+  <div class="data-source">
+    <span>GDELT</span> gdelt-bq.gdeltv2.events ·
+    <span class="tg">Telegram</span> Official UA Military Channels · mordecai3 Geoparsing
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── Embedded data
+const GDELT = [{"source":"GDELT","lat":49.4285,"lng":32.0621,"location":"Cherkasy, Cherkas'ka Oblast', Ukraine","actor1":"KHARKIV","actor2":"Unknown","eventCode":"19","eventLabel":"Use of Force","goldstein":-10.0,"mentions":8,"tone":-14.48,"url":"https://24tv.ua/kharkiv/ataka-harkiv-chuguyiv-stalasya-1-2-kvitnya-shho-vidomo-pro-obstril_n3040923","date":"20260402"},{"source":"GDELT","lat":46.4639,"lng":30.7386,"location":"Odessa, Odes'ka Oblast, Ukraine","actor1":"ODESSA","actor2":"Unknown","eventCode":"19","eventLabel":"Use of Force","goldstein":-10.0,"mentions":8,"tone":-10.95,"url":"https://odessa-life.od.ua/news/czena-zhestokosti-pod-odessoj-pensioneru-grozit-tyurma-za-rasstrel-schenkov","date":"20260402"},{"source":"GDELT","lat":50.5218,"lng":30.2506,"location":"Irpen, Kyyivs'ka Oblast', Ukraine","actor1":"PROSECUTOR","actor2":"Unknown","eventCode":"19","eventLabel":"Use of Force","goldstein":-10.0,"mentions":4,"tone":-13.64,"url":"https://daily.com.ua/partners-news/cholovik-zalyshyv-peredsmertne-povido/","date":"20260402"},{"source":"GDELT","lat":46.4125,"lng":34.9746,"location":"Novohryhorivka, Khersons'ka Oblast', Ukraine","actor1":"UKRAINE","actor2":"Unknown","eventCode":"18","eventLabel":"Assault","goldstein":-9.0,"mentions":8,"tone":-9.84,"url":"https://daily.com.ua/partners-news/na-fronti-vidbulos-132-boiovi-zitknennya-vorog-zapustyv-maije-6-tys-droniv-kamikadze-genshtab/","date":"20260402"},{"source":"GDELT","lat":50.5218,"lng":30.2506,"location":"Irpen, Kyyivs'ka Oblast', Ukraine","actor1":"PROSECUTOR","actor2":"UKRAINE","eventCode":"19","eventLabel":"Use of Force","goldstein":-10.0,"mentions":6,"tone":-13.64,"url":"https://daily.com.ua/partners-news/cholovik-zalyshyv-peredsmertne-povido/","date":"20260402"},{"source":"GDELT","lat":50.4333,"lng":30.5167,"location":"Kiev, Ukraine (general), Ukraine","actor1":"PROSECUTOR","actor2":"KYIV","eventCode":"19","eventLabel":"Use of Force","goldstein":-10.0,"mentions":10,"tone":-13.64,"url":"https://daily.com.ua/partners-news/cholovik-zalyshyv-peredsmertne-povido/","date":"20260402"},{"source":"GDELT","lat":51.2078,"lng":30.175,"location":"Yampol, Kyyivs'ka Oblast', Ukraine","actor1":"SLAVIC","actor2":"UKRAINE","eventCode":"18","eventLabel":"Assault","goldstein":-9.0,"mentions":6,"tone":-9.84,"url":"https://daily.com.ua/partners-news/na-fronti-vidbulos-132-boiovi-zitknennya-vorog-zapustyv-maije-6-tys-droniv-kamikadze-genshtab/","date":"20260402"},{"source":"GDELT","lat":49.9808,"lng":36.2527,"location":"Kharkiv, Kharkivs'ka Oblast', Ukraine","actor1":"RUSSIA","actor2":"UKRAINE","eventCode":"19","eventLabel":"Use of Force","goldstein":-9.5,"mentions":8,"tone":-1.75,"url":"https://www.hashtag.al/index.php/2026/04/01/rusia-thote-se-ka-marre-nen-kontroll-gjithe-rajonin-e-luhanskut/","date":"20260402"},{"source":"GDELT","lat":49.0,"lng":32.0,"location":"Ukraine","actor1":"UKRAINE","actor2":"Unknown","eventCode":"18","eventLabel":"Assault","goldstein":-9.0,"mentions":4,"tone":-6.46,"url":"https://society.comments.ua/news/warrussia/skandalnoe-zayavlenie-geroya-ukrainy-kogo-zhestoko-raskritikoval-802636.html","date":"20260402"},{"source":"GDELT","lat":50.4333,"lng":30.5167,"location":"Kiev, Ukraine (general), Ukraine","actor1":"KIEV","actor2":"RUSSIAN","eventCode":"18","eventLabel":"Assault","goldstein":-9.0,"mentions":2,"tone":-1.76,"url":"https://mkd.mk/svet/eu-pomoshta-za-ukraina-od-90-milijardi-evra-zavisi-od-ishodot-na-izborite-vo-ungarija/","date":"20260402"}];
+
+const TELEGRAM = [{"source":"Telegram","lat":50.45466,"lng":30.5238,"location":"Kyiv","channel":"GeneralStaffZSU","text":"Battle for Kyiv. April 2, 2022 is a date that will forever go down in history as the day of complete de-occupation of Kyiv region.","views":"7.94K","admin1":"Kyiv City","url":"https://t.me/GeneralStaffZSU/36807","date":"2026-04-02T07:23:11+00:00","score":1.0},{"source":"Telegram","lat":50.45466,"lng":30.5238,"location":"Kyiv","channel":"GeneralStaffZSU","text":"Today is the fourth anniversary of the end of the battle for Kyiv and the liberation of the Kyiv region from Russian occupiers.","views":"5.83K","admin1":"Kyiv City","url":"https://t.me/GeneralStaffZSU/36811","date":"2026-04-02T11:21:35+00:00","score":1.0},{"source":"Telegram","lat":50.9077,"lng":34.7981,"location":"Sumska Oblast","channel":"GeneralStaffZSU","text":"Operational information as of 4:00 p.m. 04/02/2026 regarding the Russian invasion. Since the beginning of the day, the number of attacks by the aggressor is already 127.","views":"4.94K","admin1":"Sumy Oblast","url":"https://t.me/GeneralStaffZSU/36817","date":"2026-04-02T13:15:02+00:00","score":1.0},{"source":"Telegram","lat":51.3892,"lng":34.5439,"location":"Bachivsk","channel":"GeneralStaffZSU","text":"Artillery shelling of border areas continues. Today in Sumy Oblast the settlements of Bachivsk were affected.","views":"4.94K","admin1":"Sumy Oblast","url":"https://t.me/GeneralStaffZSU/36817","date":"2026-04-02T13:15:02+00:00","score":1.0},{"source":"Telegram","lat":49.84,"lng":24.03,"location":"Lviv","channel":"GeneralStaffZSU","text":"Regarding the tragedy in Lviv - the position of the Ministry of Defense.","views":"3.32K","admin1":"Lviv Oblast","url":"https://t.me/GeneralStaffZSU/36828","date":"2026-04-02T16:51:53+00:00","score":1.0},{"source":"Telegram","lat":48.73049,"lng":37.58793,"location":"Kramatorsk","channel":"landforcesofukraine","text":"Kramatorsk. Russian terrorist attack on the city center. The occupiers struck the central part of the city with Gerber drones. Hit a residential high-rise. At least two people were killed.","views":"2.78K","admin1":"Donetsk","url":"https://t.me/landforcesofukraine/29837","date":"2026-04-02T07:11:57+00:00","score":1.0},{"source":"Telegram","lat":50.45466,"lng":30.5238,"location":"Kyiv","channel":"landforcesofukraine","text":"A new commemorative sign appeared under the Arch of Freedom of the Ukrainian People on the anniversary of the liberation of Kyiv region.","views":"2.62K","admin1":"Kyiv City","url":"https://t.me/landforcesofukraine/29847","date":"2026-04-02T09:13:22+00:00","score":1.0},{"source":"Telegram","lat":49.71,"lng":37.18,"location":"Kupiansk","channel":"landforcesofukraine","text":"Minus 6 enemy scouts per day! The activity of the newest Russian UAVs is increasing in the Kupiansk direction.","views":"2.58K","admin1":"Kharkivs'ka Oblast'","url":"https://t.me/landforcesofukraine/29856","date":"","score":1.0},{"source":"Telegram","lat":49.84,"lng":24.03,"location":"Lviv","channel":"landforcesofukraine","text":"Regarding the tragedy in Lviv - the position of the Ministry of Defense. The murderer will face inevitable punishment.","views":"1.29K","admin1":"Lviv Oblast","url":"https://t.me/landforcesofukraine/29864","date":"2026-04-02T17:28:18+00:00","score":1.0},{"source":"Telegram","lat":50.45466,"lng":30.5238,"location":"Kyiv","channel":"SBUkr","text":"The SBU and the National Police detained a Russian intelligence-combat group that was preparing contract killings in Kyiv.","views":"35.7K","admin1":"Kyiv City","url":"https://t.me/SBUkr/17223","date":"2026-03-31T09:07:33+00:00","score":1.0},{"source":"Telegram","lat":46.6354,"lng":32.6169,"location":"Kherson","channel":"SBUkr","text":"According to SBU materials, an FSB agent who tried to blow up the Kherson TCC received 15 years in prison.","views":"45.5K","admin1":"Khersons'ka Oblast'","url":"https://t.me/SBUkr/17230","date":"2026-03-31T13:00:03+00:00","score":1.0},{"source":"Telegram","lat":46.48572,"lng":30.74326,"location":"Odesa","channel":"SBUkr","text":"The SBU detained a Russian agent who tried to blow up a truck with valuable equipment for a heat supply facility in Odesa.","views":"86.3K","admin1":"Odes'ka Oblast","url":"https://t.me/SBUkr/17232","date":"2026-04-01T07:00:07+00:00","score":1.0},{"source":"Telegram","lat":50.45466,"lng":30.5238,"location":"Kyiv","channel":"SBUkr","text":"The SBU detained a Russian agent in the Kyiv region who was registering Starlinks for Russians.","views":"42.5K","admin1":"Kyiv City","url":"https://t.me/SBUkr/17237","date":"2026-04-01T08:30:02+00:00","score":1.0},{"source":"Telegram","lat":50.5218,"lng":30.2506,"location":"Irpin","channel":"SBUkr","text":"The builder from Irpin registered a Starlink for the enemy and transferred credentials to his curator.","views":"42.5K","admin1":"Kyyivs'ka Oblast'","url":"https://t.me/SBUkr/17237","date":"2026-04-01T08:30:02+00:00","score":1.0}];
+
+// ── State
+let gdeltVisible = true, tgVisible = true;
+let gdeltMarkers = [], tgMarkers = [];
+let activeFilter = 'all';
+let map;
+
+// ── Clock
+function updateClock() {
+  document.getElementById('clock').textContent = new Date().toUTCString().replace('GMT','UTC');
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ── Init map
+map = L.map('map', { center:[49.0,32.0], zoom:6, zoomControl:false });
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution:'© OpenStreetMap © CARTO', maxZoom:18
+}).addTo(map);
+L.control.zoom({ position:'topright' }).addTo(map);
+
+// ── Legend
+const legend = L.control({ position:'bottomleft' });
+legend.onAdd = () => {
+  const d = L.DomUtil.create('div','map-legend');
+  d.innerHTML = `
+    <div class="legend-title">Data Sources</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ff2d55"></div>GDELT Use of Force</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ff6b35"></div>GDELT Assault</div>
+    <div class="legend-dot" style="display:none"></div>
+    <div class="legend-title" style="margin-top:8px">Telegram OSINT</div>
+    <div class="legend-item"><div class="legend-sq" style="background:#29b6f6;opacity:0.8"></div>Geolocated mention</div>
+    <div class="legend-title" style="margin-top:8px">Size = Mentions/Views</div>
+  `;
+  return d;
+};
+legend.addTo(map);
+
+// ── KPIs
+function renderKPIs() {
+  const avgGold = (GDELT.reduce((s,e)=>s+e.goldstein,0)/GDELT.length).toFixed(1);
+  const totMent = GDELT.reduce((s,e)=>s+e.mentions,0);
+  const avgTone = (GDELT.reduce((s,e)=>s+e.tone,0)/GDELT.length).toFixed(2);
+  const channels = [...new Set(TELEGRAM.map(t=>t.channel))].length;
+
+  document.getElementById('kpi-gdelt').textContent = GDELT.length;
+  document.getElementById('kpi-tg').textContent = TELEGRAM.length;
+  document.getElementById('kpi-channels').textContent = channels;
+  document.getElementById('kpi-goldstein').textContent = avgGold;
+  document.getElementById('kpi-mentions').textContent = totMent;
+  document.getElementById('kpi-total').textContent = GDELT.length + TELEGRAM.length;
+  document.getElementById('stat-tone').textContent = avgTone;
+}
+
+// ── Render GDELT markers
+function renderGDELT() {
+  gdeltMarkers.forEach(m => map.removeLayer(m));
+  gdeltMarkers = [];
+  if (!gdeltVisible) return;
+
+  const colors = {'18':'#ff6b35','19':'#ff2d55','20':'#ff0040'};
+  GDELT.forEach((ev, i) => {
+    const color = colors[ev.eventCode] || '#00d4ff';
+    const radius = Math.max(5, Math.min(18, ev.mentions * 1.8));
+    const circle = L.circleMarker([ev.lat, ev.lng], {
+      radius, fillColor:color, color:color, weight:1.5, opacity:0.9, fillOpacity:0.35
+    });
+    circle.bindPopup(`
+      <div class="popup-inner">
+        <div class="popup-source gdelt">GDELT — ${ev.eventLabel}</div>
+        <div class="popup-location">${ev.location}</div>
+        <div class="popup-row"><span class="label">Actor 1</span><span>${ev.actor1}</span></div>
+        <div class="popup-row"><span class="label">Actor 2</span><span>${ev.actor2}</span></div>
+        <div class="popup-row"><span class="label">Goldstein</span><span style="color:#ff2d55">${ev.goldstein}</span></div>
+        <div class="popup-row"><span class="label">Mentions</span><span>${ev.mentions}</span></div>
+        <div class="popup-row"><span class="label">Tone</span><span>${ev.tone}</span></div>
+        <a class="popup-link" href="${ev.url}" target="_blank">→ View Source</a>
+      </div>
+    `, { maxWidth:300 });
+    circle.on('click', () => highlightCard('gdelt-'+i));
+    circle.addTo(map);
+    gdeltMarkers.push(circle);
+  });
+}
+
+// ── Render Telegram markers
+function renderTelegram() {
+  tgMarkers.forEach(m => map.removeLayer(m));
+  tgMarkers = [];
+  if (!tgVisible) return;
+
+  TELEGRAM.forEach((ev, i) => {
+    const viewNum = parseFloat(ev.views) * (ev.views.includes('K') ? 1000 : 1);
+    const radius = Math.max(6, Math.min(20, viewNum / 5000));
+    const marker = L.circleMarker([ev.lat, ev.lng], {
+      radius, fillColor:'#29b6f6', color:'#29b6f6', weight:2,
+      opacity:0.9, fillOpacity:0.25, dashArray:'4,3'
+    });
+    marker.bindPopup(`
+      <div class="popup-inner">
+        <div class="popup-source tg">Telegram — @${ev.channel}</div>
+        <div class="popup-location">${ev.location}</div>
+        <div class="popup-row"><span class="label">Oblast</span><span>${ev.admin1}</span></div>
+        <div class="popup-row"><span class="label">Views</span><span>${ev.views}</span></div>
+        <div class="popup-row"><span class="label">Geo Score</span><span style="color:#29b6f6">${ev.score}</span></div>
+        <div class="popup-text">${ev.text.substring(0,150)}...</div>
+        <a class="popup-link" href="${ev.url}" target="_blank">→ View on Telegram</a>
+      </div>
+    `, { maxWidth:300 });
+    marker.on('click', () => highlightCard('tg-'+i));
+    marker.addTo(map);
+    tgMarkers.push(marker);
+  });
+}
+
+// ── Render feed
+function renderFeed(filter) {
+  const feed = document.getElementById('event-feed');
+  let items = [];
+
+  if (filter === 'all' || filter === 'gdelt') {
+    GDELT.forEach((ev, i) => {
+      items.push({ type:'gdelt', idx:i, data:ev, sortKey: ev.mentions });
+    });
+  }
+  if (filter === 'all' || filter === 'tg') {
+    TELEGRAM.forEach((ev, i) => {
+      const v = parseFloat(ev.views) * (ev.views.includes('K') ? 1000 : 1);
+      items.push({ type:'tg', idx:i, data:ev, sortKey: v });
+    });
+  }
+
+  items.sort((a,b) => b.sortKey - a.sortKey);
+  document.getElementById('feed-count').textContent = `${items.length} signals`;
+
+  feed.innerHTML = items.map(({type, idx, data}) => {
+    if (type === 'gdelt') {
+      const gPct = Math.abs(data.goldstein)/10*100;
+      return `
+        <div class="event-card gdelt-card" id="gdelt-${idx}" onclick="focusEvent(${data.lat},${data.lng},'gdelt-${idx}')">
+          <div class="event-card-header">
+            <div class="event-location">${data.location}</div>
+            <span class="event-badge badge-gdelt">${data.eventLabel}</span>
+          </div>
+          <div class="event-sub">${data.actor1} → ${data.actor2 !== 'Unknown' ? data.actor2 : '—'}</div>
+          <div class="event-meta">
+            <div class="meta-item"><span>G</span>
+              <div class="goldstein-bar"><div class="goldstein-fill" style="width:${gPct}%"></div></div>
+              <span style="color:#ff2d55;font-size:0.6rem">${data.goldstein}</span>
+            </div>
+            <div class="meta-item">📡 ${data.mentions}</div>
+          </div>
+          <a class="source-link" href="${data.url}" target="_blank" onclick="event.stopPropagation()">↗ ${(() => { try { return new URL(data.url).hostname; } catch(e) { return data.url; } })()}</a>
+        </div>`;
+    } else {
+      return `
+        <div class="event-card tg-card" id="tg-${idx}" onclick="focusEvent(${data.lat},${data.lng},'tg-${idx}')">
+          <div class="event-card-header">
+            <div class="event-location">${data.location}</div>
+            <span class="event-badge badge-tg">Telegram</span>
+          </div>
+          <div class="event-sub">@${data.channel} · ${data.views} views</div>
+          <div class="event-text">${data.text}</div>
+          <a class="source-link" href="${data.url}" target="_blank" onclick="event.stopPropagation()">↗ t.me/${data.channel}</a>
+        </div>`;
+    }
+  }).join('');
+}
+
+// ── Focus
+function focusEvent(lat, lng, cardId) {
+  map.setView([lat, lng], 9, { animate:true });
+  highlightCard(cardId);
+}
+
+function highlightCard(id) {
+  document.querySelectorAll('.event-card').forEach(c => c.classList.remove('highlighted'));
+  const card = document.getElementById(id);
+  if (card) { card.classList.add('highlighted'); card.scrollIntoView({ behavior:'smooth', block:'nearest' }); }
+}
+
+// ── Layer toggle
+function toggleLayer(layer) {
+  if (layer === 'gdelt') {
+    gdeltVisible = !gdeltVisible;
+    document.getElementById('gdelt-toggle').classList.toggle('off', !gdeltVisible);
+    renderGDELT();
+  } else {
+    tgVisible = !tgVisible;
+    document.getElementById('tg-toggle').classList.toggle('off', !tgVisible);
+    renderTelegram();
+  }
+}
+
+// ── Filter feed
+function filterFeed(filter, btn) {
+  activeFilter = filter;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active','active-tg','active-danger'));
+  btn.classList.add('active');
+  renderFeed(filter);
+}
+
+// ── Boot
+renderKPIs();
+renderGDELT();
+renderTelegram();
+renderFeed('all');
+</script>
+</body>
+</html>
