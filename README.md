@@ -6,7 +6,7 @@ An open-source OSINT dashboard monitoring the Russia-Ukraine conflict using
 GDELT event data and Ukrainian military Telegram channels.
 
 ## Live Dashboard
-[View Dashboard](https://yourusername.github.io/ukraine-osint-dashboard)
+[View Dashboard](https://kenhartman04.github.io/ukraine-dashboard/)
 
 ## Data Sources
 - **GDELT Project** — Global Database of Events, Language and Tone
